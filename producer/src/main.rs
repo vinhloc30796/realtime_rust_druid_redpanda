@@ -1,6 +1,19 @@
 // Times
 use core::time::Duration;
 use kafka::producer::{Producer, Record, RequiredAcks};
+// IO
+use polars::prelude::*;
+
+// File Reader
+
+fn read_parquets() -> LazyFrame {
+    let args = ScanArgsParquet::default();
+    let df = LazyFrame::scan_parquet("./data/hacker_news_full_*.parquet", args).unwrap();
+
+    df
+}
+
+// Producer
 
 pub struct RedpandaProducer {
     producer: Producer,
@@ -24,12 +37,18 @@ impl RedpandaProducer {
 }
 
 fn main() {
+    // Read data
+    let df = read_parquets().collect().unwrap();
+    let first_row = df.get_row(0).unwrap();
+
+    // Create producer
     let mut producer = RedpandaProducer::new();
     let topic = "hello-world-topic";
-    let value = "Hello World!";
+    // value = "Hello World! First row: {first_row}"
+    let value = format!("Hello World! First row: {:#?}", first_row);
 
-    // Loop indefinitely
-    loop {
+    // Loop 5 times
+    for _ in 0..5 {
         let current_time_str = chrono::Local::now().to_string();
         let timed_value = format!("{}: {}", current_time_str, value);
         producer.send(topic, &timed_value);
