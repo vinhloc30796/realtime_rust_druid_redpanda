@@ -1,11 +1,13 @@
 // Times
 use core::time::Duration;
-use kafka::producer::{Producer, Record, RequiredAcks};
+use rdkafka::config::ClientConfig;
+use rdkafka::error::KafkaError;
+use rdkafka::message::OwnedMessage;
+use rdkafka::producer::{FutureProducer, FutureRecord};
 // IO
-use polars::frame::row::Row;
+use log::info;
 use polars::prelude::*;
 // Serialization
-// use crate::prost;
 use prost::{Enumeration, Message};
 use std::iter::zip;
 
@@ -128,27 +130,36 @@ fn frame_into_protobuf(df: DataFrame) -> Vec<Vec<u8>> {
 // Producer
 
 pub struct RedpandaProducer {
-    producer: Producer,
+    timeout_duration: Duration,
+    producer: FutureProducer,
 }
 
 impl RedpandaProducer {
     pub fn new() -> Self {
         let timeout_duration = Duration::from_secs(1);
-        let producer = Producer::from_hosts(vec!["localhost:9092".to_owned()])
-            .with_ack_timeout(timeout_duration)
-            .with_required_acks(RequiredAcks::One)
+        let producer: FutureProducer = ClientConfig::new()
+            .set("bootstrap.servers", "localhost:9092")
+            .set(
+                "message.timeout.ms",
+                &timeout_duration.as_millis().to_string(),
+            )
             .create()
-            .unwrap();
-        Self { producer: producer }
+            .expect("Producer creation error");
+        Self {
+            timeout_duration: timeout_duration,
+            producer: producer,
+        }
     }
 
-    pub fn send(&mut self, topic: &str, value: &str) {
-        let record = Record::from_value(topic, value);
-        self.producer.send(&record).unwrap();
+    pub async fn send(&mut self, topic: &str, value: &str) {
+        let record = FutureRecord::to(&topic).payload(value).key("hackernews");
+        let delivery_status = self.producer.send(record, self.timeout_duration).await;
+        info!("Delivery status: {:#?}", delivery_status)
     }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     // Read data
     let df: DataFrame = read_parquets().collect().unwrap();
     let col_names: Vec<String> = df
@@ -159,10 +170,15 @@ fn main() {
     println!("Column Names: {:#?}", col_names);
 
     // Create producer
-    // let mut producer = RedpandaProducer::new();
+    let mut producer = RedpandaProducer::new();
     let topic = "hello-world-topic";
     // value = "Hello World! First row: {first_row}"
     // let value = format!("Hello World! First row: {:#?}", first_row);
 
-    let protobuf_messages = frame_into_protobuf(df);
+    // let protobuf_messages = frame_into_protobuf(df);
+    producer.send(topic, "Hello World!").await;
+    // for message in protobuf_messages {
+    //     producer.send(topic, &message);
+    //     println!("Sent: {:#?}", message);
+    // }
 }
