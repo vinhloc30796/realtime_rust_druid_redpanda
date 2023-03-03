@@ -1,0 +1,15 @@
+syntax = "proto3";
+package hackernews;
+
+enum RowType {
+    STORY = 0;
+    COMMENT = 1;
+}
+
+message Row {
+    uint32 id = 1;
+    uint64 timestamp = 2;
+    RowType type = 3;
+    string title = 4;
+    uint32 score = 5;
+}

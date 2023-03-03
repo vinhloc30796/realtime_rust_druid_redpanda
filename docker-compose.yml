@@ -41,6 +41,11 @@ services:
           schemaRegistry:
             enabled: true
             urls: ["http://redpanda:8081"]
+          # https://docs.redpanda.com/docs/manage/console/protobuf/#local-filesystem
+          protobuf:
+            enabled: true
+            schemaRegistry:
+              enabled: true
         redpanda:
           adminApi:
             enabled: true
