@@ -149,6 +149,9 @@ impl RedpandaProducer {
 
 #[tokio::main]
 async fn main() {
+    // Logging config with env_logger
+    env_logger::init();
+
     // Read data
     let df: DataFrame = read_parquets().collect().unwrap();
     let col_names: Vec<String> = df
@@ -156,7 +159,7 @@ async fn main() {
         .iter()
         .map(|x| x.to_string())
         .collect();
-    println!("Column Names: {:#?}", col_names);
+    info!("Column Names: {:#?}", col_names);
 
     // Create producer
     let mut producer = RedpandaProducer::new();
@@ -169,6 +172,6 @@ async fn main() {
     let protobuf_messages = frame_into_protobuf(df);
     for message in protobuf_messages {
         producer.send_protobuf(topic, &message).await;
-        println!("Sent: {:#?}", message);
+        info!("Sent: {:#?}", message);
     }
 }
