@@ -16,7 +16,7 @@ volumes:
   middle_var: null
   router_var: null
 
-services:
+services:    
   # 1. Redpanda
   redpanda:
     image: docker.redpanda.com/redpandadata/redpanda:v22.3.11
@@ -24,6 +24,7 @@ services:
       - redpanda start
       - --smp 1
       - --overprovisioned
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
       - --kafka-addr PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092
       - --advertise-kafka-addr PLAINTEXT://redpanda:29092,OUTSIDE://localhost:9092
       - --pandaproxy-addr 0.0.0.0:8082
@@ -127,7 +128,7 @@ services:
       - druid_network
 
   coordinator:
-    image: apache/druid:25.0.0
+    build: ./druid
     container_name: coordinator
     volumes:
       - druid_shared:/opt/shared
@@ -144,10 +145,11 @@ services:
     environment:
       - druid_plaintextPort=28081
     networks:
+      - redpanda_network
       - druid_network
 
   broker:
-    image: apache/druid:25.0.0
+    build: ./druid
     container_name: broker
     volumes:
       - broker_var:/opt/druid/var
@@ -167,7 +169,7 @@ services:
       - druid_network
 
   historical:
-    image: apache/druid:25.0.0
+    build: ./druid
     container_name: historical
     volumes:
       - druid_shared:/opt/shared
@@ -188,7 +190,7 @@ services:
       - druid_network
 
   middlemanager:
-    image: apache/druid:25.0.0
+    build: ./druid
     container_name: middlemanager
     volumes:
       - druid_shared:/opt/shared
@@ -205,10 +207,11 @@ services:
     env_file:
       - druid.env
     networks:
+      - redpanda_network
       - druid_network
 
   router:
-    image: apache/druid:25.0.0
+    build: ./druid
     container_name: router
     volumes:
       - router_var:/opt/druid/var
