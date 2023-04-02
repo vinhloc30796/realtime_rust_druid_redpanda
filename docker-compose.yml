@@ -3,17 +3,28 @@ version: '3.7'
 networks:
   redpanda_network:
     driver: bridge
+  druid_network:
+    driver: bridge
 
 volumes:
   redpanda: null
+  metadata_data: null
+  druid_shared: null
+  coordinator_var: null
+  broker_var: null
+  historical_var: null
+  middle_var: null
+  router_var: null
 
-services:
+services:    
+  # 1. Redpanda
   redpanda:
     image: docker.redpanda.com/redpandadata/redpanda:v22.3.11
     command:
       - redpanda start
       - --smp 1
       - --overprovisioned
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
       - --kafka-addr PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092
       - --advertise-kafka-addr PLAINTEXT://redpanda:29092,OUTSIDE://localhost:9092
       - --pandaproxy-addr 0.0.0.0:8082
@@ -91,3 +102,128 @@ services:
       CONNECT_GC_LOG_ENABLED: "false"
       CONNECT_HEAP_OPTS: -Xms512M -Xmx512M
       CONNECT_LOG_LEVEL: info
+
+  # 2. Druid
+  postgres:
+    container_name: postgres
+    image: postgres:latest
+    volumes:
+      - metadata_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_PASSWORD=FoolishPassword
+      - POSTGRES_USER=druid
+      - POSTGRES_DB=druid
+    networks:
+      - druid_network
+
+  # Need 3.5 or later for container nodes
+  zookeeper:
+    container_name: zookeeper
+    image: zookeeper:3.5
+    ports:
+      - "2181:2181"
+    environment:
+      - ZOO_MY_ID=1
+    networks:
+      - druid_network
+
+  coordinator:
+    build: ./druid
+    container_name: coordinator
+    volumes:
+      - druid_shared:/opt/shared
+      - coordinator_var:/opt/druid/var
+    depends_on: 
+      - zookeeper
+      - postgres
+    ports:
+      - "28081:28081"
+    command:
+      - coordinator
+    env_file:
+      - druid.env
+    environment:
+      - druid_plaintextPort=28081
+    networks:
+      - redpanda_network
+      - druid_network
+
+  broker:
+    build: ./druid
+    container_name: broker
+    volumes:
+      - broker_var:/opt/druid/var
+    depends_on: 
+      - zookeeper
+      - postgres
+      - coordinator
+    ports:
+      - "28082:28082"
+    command:
+      - broker
+    env_file:
+      - druid.env
+    environment:
+      - druid_plaintextPort=28082
+    networks:
+      - druid_network
+
+  historical:
+    build: ./druid
+    container_name: historical
+    volumes:
+      - druid_shared:/opt/shared
+      - historical_var:/opt/druid/var
+    depends_on: 
+      - zookeeper
+      - postgres
+      - coordinator
+    ports:
+      - "28083:28083"
+    command:
+      - historical
+    env_file:
+      - druid.env
+    environment:
+      - druid_plaintextPort=28083
+    networks:
+      - druid_network
+
+  middlemanager:
+    build: ./druid
+    container_name: middlemanager
+    volumes:
+      - druid_shared:/opt/shared
+      - middle_var:/opt/druid/var
+    depends_on: 
+      - zookeeper
+      - postgres
+      - coordinator
+    ports:
+      - "8091:8091"
+      - "8100-8105:8100-8105"
+    command:
+      - middleManager
+    env_file:
+      - druid.env
+    networks:
+      - redpanda_network
+      - druid_network
+
+  router:
+    build: ./druid
+    container_name: router
+    volumes:
+      - router_var:/opt/druid/var
+    depends_on:
+      - zookeeper
+      - postgres
+      - coordinator
+    ports:
+      - "8888:8888"
+    command:
+      - router
+    env_file:
+      - druid.env
+    networks:
+      - druid_network

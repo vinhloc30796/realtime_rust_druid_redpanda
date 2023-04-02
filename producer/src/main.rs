@@ -6,7 +6,12 @@ use rdkafka::producer::{FutureProducer, FutureRecord};
 use log::info;
 use polars::prelude::*;
 // Serialization
-use prost::{Message};
+use prost::Message;
+use schema_registry_converter::async_impl::{
+    easy_proto_raw::EasyProtoRawEncoder,
+    schema_registry::SrSettings
+};
+use schema_registry_converter::schema_registry_common::SubjectNameStrategy;
 
 // File Reader
 pub mod hackernews {
@@ -28,7 +33,7 @@ fn read_parquets() -> LazyFrame {
 
 // Serialization
 pub fn serialize_hackernews_row(row: hackernews::Row) -> Vec<u8> {
-    let mut buf = Vec::new();
+    let mut buf = Vec::with_capacity(row.encoded_len());
     row.encode(&mut buf).unwrap();
     buf
 }
@@ -115,6 +120,7 @@ fn frame_into_protobuf(df: DataFrame) -> Vec<Vec<u8>> {
 pub struct RedpandaProducer {
     timeout_duration: Duration,
     producer: FutureProducer,
+    encoder: EasyProtoRawEncoder,
 }
 
 impl RedpandaProducer {
@@ -128,9 +134,13 @@ impl RedpandaProducer {
             )
             .create()
             .expect("Producer creation error");
+        let encoder: EasyProtoRawEncoder = EasyProtoRawEncoder::new(
+            SrSettings::new("http://localhost:8081".to_string())
+        );
         Self {
             timeout_duration: timeout_duration,
             producer: producer,
+            encoder: encoder,
         }
     }
 
@@ -141,7 +151,12 @@ impl RedpandaProducer {
     }
 
     pub async fn send_protobuf(&mut self, topic: &str, value: &Vec<u8>) {
-        let record = FutureRecord::to(&topic).payload(value).key("hackernews");
+        let strategy = SubjectNameStrategy::TopicNameStrategy(topic.to_string(), false);
+        let payload = match self.encoder.encode_single_message(&value, strategy).await {
+            Ok(x) => x,
+            Err(e) => panic!("Error encoding message: {:#?}", e),
+        };
+        let record = FutureRecord::to(&topic).payload(&payload).key("hackernews");
         let delivery_status = self.producer.send(record, self.timeout_duration).await;
         info!("Delivery status: {:#?}", delivery_status)
     }
@@ -161,17 +176,19 @@ async fn main() {
         .collect();
     info!("Column Names: {:#?}", col_names);
 
-    // Create producer
+    // Create producer: hello-world
     let mut producer = RedpandaProducer::new();
     let topic = "hello-world-topic";
     producer.send(topic, "Hello World!").await;
-    // value = "Hello World! First row: {first_row}"
-    // let value = format!("Hello World! First row: {:#?}", first_row);
 
+    // Create schema: hackernews-topic-value
+    // TODO
+    // Create producer: hackernews-topic
     let topic: &str = "hackernews-topic";
     let protobuf_messages = frame_into_protobuf(df);
     for message in protobuf_messages {
+        let decoded = hackernews::Row::decode(&message[..]).unwrap();
         producer.send_protobuf(topic, &message).await;
-        info!("Sent: {:#?}", message);
+        info!("Orig: {:#?}; Sent: {:#?}", decoded, message);
     }
 }
